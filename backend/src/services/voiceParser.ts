@@ -58,11 +58,13 @@ function getDateOverride(text: string, referenceDate: Date): Date | null {
 function resolveHour(hour: number | null | undefined, timeWindow: string): number {
   if (hour == null) return -1;
 
-  const hasTarde = /de la (?:tarde|noche)/i.test(timeWindow);
+  const hasNoche = /de la noche/i.test(timeWindow);
+  const hasTarde = /de la tarde/i.test(timeWindow);
   const hasMana = /de la (?:mañana|madrugada)/i.test(timeWindow);
 
-  if (hasTarde && !hasMana) return hour < 12 ? hour + 12 : hour; // PM explícito
-  if (hasMana && !hasTarde) return hour === 12 ? 0 : hour;       // AM explícito
+  if (hasNoche && !hasMana) return hour === 12 ? 0 : hour < 12 ? hour + 12 : hour;  // "12 de la noche" = 00:00
+  if (hasTarde && !hasMana && !hasNoche) return hour < 12 ? hour + 12 : hour;       // PM explícito
+  if (hasMana && !hasTarde && !hasNoche) return hour === 12 ? 0 : hour;             // AM explícito
   // Heurística sin qualifier
   return hour >= 1 && hour <= 7 ? hour + 12 : hour;
 }
@@ -77,11 +79,12 @@ function resolveHour(hour: number | null | undefined, timeWindow: string): numbe
  *
  * Retorna el número crudo (ej: 4, 12, 11) o null si no hay patrón "de X a Y".
  */
-function extractEndHour(timeWindow: string): number | null {
+function extractEndHour(timeWindow: string): { hour: number; minute: number } | null {
   const m = timeWindow.match(
-    /de\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+a\s+(\d{1,2})(?::\d{2})?\s*(?:am|pm)?/i,
+    /de\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+a\s+(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)?/i,
   );
-  return m ? parseInt(m[1], 10) : null;
+  if (!m) return null;
+  return { hour: parseInt(m[1], 10), minute: m[2] ? parseInt(m[2], 10) : 0 };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -244,10 +247,10 @@ export function parseVoiceInput(
 
     const rawEndFromText = extractEndHour(timeWindow);
     if (rawEndFromText != null) {
-      const resolved = resolveHour(rawEndFromText, timeWindow);
+      const resolved = resolveHour(rawEndFromText.hour, timeWindow);
       if (resolved >= 0) {
         endHour = resolved;
-        endMinute = 0;
+        endMinute = rawEndFromText.minute;
         hasEndTime = true;
       }
     } else if (timeResult.end != null && timeResult.end.get('hour') != null) {

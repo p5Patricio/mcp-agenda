@@ -10,11 +10,12 @@ export function searchEvents(
     return [];
   }
 
-  const pattern = `%${query}%`;
+  const escaped = query.replace(/[\\%_]/g, '\\$&');
+  const pattern = `%${escaped}%`;
   const stmt = db.prepare(`
     SELECT * FROM events
     WHERE agentId = ?
-      AND (title LIKE ? OR description LIKE ?)
+      AND (title LIKE ? ESCAPE '\\' OR description LIKE ? ESCAPE '\\')
     ORDER BY date DESC, startTime DESC
     LIMIT ?
   `);

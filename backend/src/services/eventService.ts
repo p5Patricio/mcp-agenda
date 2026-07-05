@@ -16,8 +16,8 @@ function nowISO(): string {
 }
 
 const insertStmt = db.prepare(`
-  INSERT INTO events (id, userId, agentId, title, description, startTime, endTime, date, color, reminderMinutes, pushToken, createdVia, rawTranscription, createdAt, updatedAt)
-  VALUES (@id, @userId, @agentId, @title, @description, @startTime, @endTime, @date, @color, @reminderMinutes, @pushToken, @createdVia, @rawTranscription, @createdAt, @updatedAt)
+  INSERT INTO events (id, userId, agentId, title, description, startTime, endTime, date, color, reminderMinutes, createdVia, rawTranscription, createdAt, updatedAt)
+  VALUES (@id, @userId, @agentId, @title, @description, @startTime, @endTime, @date, @color, @reminderMinutes, @createdVia, @rawTranscription, @createdAt, @updatedAt)
 `);
 
 const getByIdStmt = db.prepare('SELECT * FROM events WHERE id = ?');
@@ -36,7 +36,6 @@ export async function createEvent(eventData: Partial<Event>): Promise<Event> {
     date: eventData.date ?? now.slice(0, 10),
     color: eventData.color ?? randomColor(),
     reminderMinutes: eventData.reminderMinutes ?? 15,
-    pushToken: eventData.pushToken,
     createdVia: eventData.createdVia ?? 'manual',
     rawTranscription: eventData.rawTranscription,
     createdAt: now,
@@ -85,6 +84,11 @@ export async function getEventById(id: string): Promise<Event | null> {
   return event ?? null;
 }
 
+const ALLOWED_UPDATE_FIELDS = new Set([
+  'title', 'description', 'date', 'startTime', 'endTime',
+  'color', 'reminderMinutes',
+]);
+
 export async function updateEvent(id: string, data: Partial<Event>): Promise<Event> {
   const existing = getByIdStmt.get(id);
   if (!existing) {
@@ -95,7 +99,7 @@ export async function updateEvent(id: string, data: Partial<Event>): Promise<Eve
   const values: unknown[] = [];
 
   for (const [key, value] of Object.entries(data)) {
-    if (key === 'id' || value === undefined) continue;
+    if (key === 'id' || value === undefined || !ALLOWED_UPDATE_FIELDS.has(key)) continue;
     fields.push(`${key} = ?`);
     values.push(value);
   }

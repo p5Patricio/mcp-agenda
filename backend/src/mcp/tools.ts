@@ -17,12 +17,15 @@ export type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolRes
 // Zod Schemas
 // ────────────────────────────────────────────────────────────
 
+const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
+const isoDateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+
 const CreateEventArgsSchema = z.object({
   agentId: z.string().default('default'),
   title: z.string().optional(),
-  date: z.string().optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
+  date: z.string().regex(isoDateRegex, 'date must be YYYY-MM-DD').optional(),
+  startTime: z.string().regex(isoDateTimeRegex, 'startTime must be ISO 8601').optional(),
+  endTime: z.string().regex(isoDateTimeRegex, 'endTime must be ISO 8601').optional(),
   text: z.string().optional(),
   referenceDate: z.string().optional(),
 });
@@ -42,9 +45,9 @@ const UpdateEventArgsSchema = z.object({
   eventId: z.string().min(1, 'eventId is required'),
   title: z.string().optional(),
   description: z.string().optional(),
-  date: z.string().optional(),
-  startTime: z.string().optional(),
-  endTime: z.string().optional(),
+  date: z.string().regex(isoDateRegex, 'date must be YYYY-MM-DD').optional(),
+  startTime: z.string().regex(isoDateTimeRegex, 'startTime must be ISO 8601').optional(),
+  endTime: z.string().regex(isoDateTimeRegex, 'endTime must be ISO 8601').optional(),
   color: z.string().optional(),
   reminderMinutes: z.number().optional(),
 });
@@ -79,8 +82,8 @@ const FindFreeSlotsArgsSchema = z.object({
 
 const CheckConflictsArgsSchema = z.object({
   agentId: z.string().default('default'),
-  startTime: z.string().min(1, 'startTime is required'),
-  endTime: z.string().min(1, 'endTime is required'),
+  startTime: z.string().regex(isoDateTimeRegex, 'startTime must be ISO 8601'),
+  endTime: z.string().regex(isoDateTimeRegex, 'endTime must be ISO 8601'),
   excludeEventId: z.string().optional(),
 });
 

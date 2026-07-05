@@ -1,10 +1,10 @@
 {
   "name": "mcp-agenda",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "MCP server for AI agent calendar management",
   "main": "dist/index.js",
   "bin": {
-    "mcp-agenda": "./bin/cli.js"
+    "mcp-agenda": "bin/cli.js"
   },
   "scripts": {
     "build": "tsc",

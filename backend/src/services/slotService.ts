@@ -50,9 +50,10 @@ export function findFreeSlots(
     if (eventEnd > gapStart) {
       const gapMinutes = eventStartMin - gapStart;
       if (gapMinutes >= durationMinutes && eventStartMin > gapStart) {
+        const gapEnd = Math.min(eventStartMin, businessEnd);
         slots.push({
           start: toLocalISO(date, Math.floor(gapStart / 60), gapStart % 60),
-          end: toLocalISO(date, Math.floor(eventStartMin / 60), eventStartMin % 60),
+          end: toLocalISO(date, Math.floor(gapEnd / 60), gapEnd % 60),
         });
       }
       currentMin = Math.max(currentMin, eventEnd);

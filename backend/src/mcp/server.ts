@@ -12,8 +12,10 @@ import {
 import { toolHandlers, toolDefinitions } from './tools';
 import { resourceTemplates, handleReadResource } from './resources';
 
+const pkg = require('../../package.json');
+
 const server = new Server(
-  { name: 'mcp-agenda-mcp', version: '1.0.0' },
+  { name: 'mcp-agenda-mcp', version: pkg.version },
   { capabilities: { tools: {}, resources: {} } },
 );
 

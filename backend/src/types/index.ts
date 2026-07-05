@@ -9,7 +9,6 @@ export interface Event {
   date: string;              // "YYYY-MM-DD" para queries por día
   color: string;             // hex color del evento
   reminderMinutes: number;   // default 15
-  pushToken?: string;        // Expo push token (deprecated)
   createdVia: 'voice' | 'manual';
   rawTranscription?: string; // texto original de voz
   createdAt: string;

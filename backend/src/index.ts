@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { runServer } from './mcp/server';
-import { initialize, DB_DIR } from './config/database';
+import { DB_DIR } from './config/database';
 import * as fs from 'fs';
 import * as path from 'path';
 
@@ -54,9 +54,7 @@ async function cmdInit(): Promise<void> {
       console.log('Copied legacy database. Running schema migration...');
     }
 
-    // Run initialization (creates tables, indexes, upgrades schema)
-    initialize();
-
+    // Database already initialized at module load (database.ts)
     console.log(`Database ready at ${DB_DIR}`);
     process.exit(0);
   } catch (err) {
@@ -77,7 +75,7 @@ function main(): void {
 
   switch (command) {
     case 'init':
-      cmdInit();
+      cmdInit().catch(handleError);
       break;
 
     case '--help':
