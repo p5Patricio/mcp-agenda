@@ -1,0 +1,31 @@
+{
+  "name": "mcp-agenda",
+  "version": "1.0.0",
+  "description": "MCP server for AI agent calendar management",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-agenda": "./bin/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "prepublishOnly": "npm test && npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/uuid": "^10.0.0",
+    "better-sqlite3": "^12.11.1",
+    "chrono-node": "^2.7.0",
+    "dotenv": "^16.4.5",
+    "uuid": "^13.0.0",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.11.0",
+    "jest": "^30.3.0",
+    "ts-jest": "^29.4.6",
+    "typescript": "^5.3.3"
+  }
+}

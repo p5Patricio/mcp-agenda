@@ -1,0 +1,15 @@
+project: agent-calendar
+artifact_store: openspec
+strict_tdd: true
+testing:
+  backend:
+    runner: jest
+    command: cd backend && npm test
+    coverage: cd backend && npx jest --coverage
+    typecheck: cd backend && npx tsc --noEmit
+stack:
+  backend:
+    runtime: node
+    framework: mcp
+    language: typescript
+    database: sqlite

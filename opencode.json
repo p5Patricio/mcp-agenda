@@ -1,0 +1,10 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "references": {
+    "backend": {
+      "path": "backend",
+      "description": "Agent Calendar MCP Server: calendar management for AI agents via MCP stdio"
+    }
+  },
+  "instructions": ["AGENTS.md"]
+}

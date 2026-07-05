@@ -1,0 +1,11 @@
+.codegraph/
+.git/
+src/
+tsconfig.json
+jest.config.js
+node_modules/
+__tests__/
+data/
+coverage/
+.env
+assets/
