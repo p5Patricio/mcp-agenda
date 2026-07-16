@@ -30,7 +30,7 @@ jest.mock('../../services/conflictService', () => ({
   checkConflicts: jest.fn(),
 }));
 
-import { toolHandlers } from '../tools';
+import { toolHandlers, toolDefinitions } from '../tools';
 import * as eventService from '../../services/eventService';
 import * as voiceParser from '../../services/voiceParser';
 import * as searchService from '../../services/searchService';
@@ -631,5 +631,226 @@ describe('get_agenda', () => {
     await expect(
       toolHandlers.get_agenda({ agentId: 'user1' }),
     ).rejects.toThrow(McpError);
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T-001: ISO regex validation (Bug #1)
+// ────────────────────────────────────────────────────────────
+
+describe('ISO datetime regex validation', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockEventService.createEvent.mockResolvedValue(mockEvent);
+  });
+
+  test('accepts timestamp without seconds (2026-07-10T09:00)', async () => {
+    const result = await toolHandlers.create_event({
+      agentId: 'user1',
+      title: 'Test',
+      date: '2026-07-03',
+      startTime: '2026-07-10T09:00',
+      endTime: '2026-07-10T10:00',
+    });
+    expect(result.isError).toBeUndefined();
+    expect(mockEventService.createEvent).toHaveBeenCalled();
+  });
+
+  test('accepts timestamp with seconds (2026-07-10T09:00:00)', async () => {
+    const result = await toolHandlers.create_event({
+      agentId: 'user1',
+      title: 'Test',
+      date: '2026-07-03',
+      startTime: '2026-07-10T09:00:00',
+      endTime: '2026-07-10T10:00:00',
+    });
+    expect(result.isError).toBeUndefined();
+    expect(mockEventService.createEvent).toHaveBeenCalled();
+  });
+
+  test('accepts timestamp with milliseconds (2026-07-10T09:00:00.000Z)', async () => {
+    const result = await toolHandlers.create_event({
+      agentId: 'user1',
+      title: 'Test',
+      date: '2026-07-03',
+      startTime: '2026-07-10T09:00:00.000Z',
+      endTime: '2026-07-10T10:00:00.000Z',
+    });
+    expect(result.isError).toBeUndefined();
+    expect(mockEventService.createEvent).toHaveBeenCalled();
+  });
+
+  test('rejects invalid format without T separator (2026/07/10 09:00)', async () => {
+    await expect(
+      toolHandlers.create_event({
+        agentId: 'user1',
+        title: 'Test',
+        date: '2026-07-03',
+        startTime: '2026/07/10 09:00',
+        endTime: '2026/07/10 10:00',
+      }),
+    ).rejects.toThrow(McpError);
+  });
+
+  test('rejects completely invalid format (abcd)', async () => {
+    await expect(
+      toolHandlers.create_event({
+        agentId: 'user1',
+        title: 'Test',
+        date: '2026-07-03',
+        startTime: 'abcd',
+        endTime: '2026-07-10T10:00',
+      }),
+    ).rejects.toThrow(McpError);
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T-002: referenceDate validation (Bug #7)
+// ────────────────────────────────────────────────────────────
+
+describe('parse_event_text referenceDate validation', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('invalid referenceDate returns error response', async () => {
+    const result = await toolHandlers.parse_event_text({
+      text: 'mañana reunión',
+      referenceDate: 'not-a-date',
+    });
+
+    expect(result.isError).toBe(true);
+    const body = JSON.parse(textContent(result));
+    expect(body.error).toBe('Invalid referenceDate format');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T-007: Confidence warning in NLP responses (Bug #3)
+// ────────────────────────────────────────────────────────────
+
+describe('confidence warning in NLP responses', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('low confidence (< 0.5) includes warning in create_event NLP response', async () => {
+    mockVoiceParser.parseVoiceInput.mockReturnValue({
+      ...mockParsedVoice,
+      confidence: 0.3,
+    });
+    mockEventService.createEvent.mockResolvedValue({
+      ...mockEvent,
+      createdVia: 'voice',
+    });
+
+    const result = await toolHandlers.create_event({
+      agentId: 'user1',
+      text: 'some ambiguous text',
+    });
+
+    const body = JSON.parse(textContent(result));
+    expect(body.confidence).toBe(0.3);
+    expect(body.warning).toBe('Low NLP confidence — review parsed fields before confirming');
+  });
+
+  test('high confidence (>= 0.5) has no warning in create_event NLP response', async () => {
+    mockVoiceParser.parseVoiceInput.mockReturnValue({
+      ...mockParsedVoice,
+      confidence: 0.8,
+    });
+    mockEventService.createEvent.mockResolvedValue({
+      ...mockEvent,
+      createdVia: 'voice',
+    });
+
+    const result = await toolHandlers.create_event({
+      agentId: 'user1',
+      text: 'clear text with time',
+    });
+
+    const body = JSON.parse(textContent(result));
+    expect(body.confidence).toBe(0.8);
+    expect(body.warning).toBeUndefined();
+  });
+
+  test('low confidence includes warning in parse_event_text response', async () => {
+    mockVoiceParser.parseVoiceInput.mockReturnValue({
+      ...mockParsedVoice,
+      confidence: 0.3,
+    });
+
+    const result = await toolHandlers.parse_event_text({
+      text: 'ambiguous text',
+    });
+
+    const body = JSON.parse(textContent(result));
+    expect(body.confidence).toBe(0.3);
+    expect(body.warning).toBe('Low NLP confidence — review parsed fields before confirming');
+  });
+
+  test('high confidence has no warning in parse_event_text response', async () => {
+    mockVoiceParser.parseVoiceInput.mockReturnValue({
+      ...mockParsedVoice,
+      confidence: 0.8,
+    });
+
+    const result = await toolHandlers.parse_event_text({
+      text: 'clear text',
+    });
+
+    const body = JSON.parse(textContent(result));
+    expect(body.confidence).toBe(0.8);
+    expect(body.warning).toBeUndefined();
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T-008: get_upcoming_agenda tool (Bug #6)
+// ────────────────────────────────────────────────────────────
+
+describe('get_upcoming_agenda', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  test('tool handler exists and is callable', async () => {
+    mockEventService.getUpcomingAgenda.mockResolvedValue([mockEvent]);
+
+    const result = await toolHandlers.get_upcoming_agenda({
+      agentId: 'test',
+      limit: 5,
+    });
+
+    expect(mockEventService.getUpcomingAgenda).toHaveBeenCalledWith('test', 5);
+    expect(textContent(result)).toContain('evt-123');
+  });
+
+  test('returns only future events from service', async () => {
+    const futureEvent = { ...mockEvent, id: 'evt-future', date: '2026-08-01' };
+    mockEventService.getUpcomingAgenda.mockResolvedValue([futureEvent]);
+
+    const result = await toolHandlers.get_upcoming_agenda({
+      agentId: 'test',
+    });
+
+    expect(mockEventService.getUpcomingAgenda).toHaveBeenCalledWith('test', 10);
+    const body = JSON.parse(textContent(result));
+    expect(body).toHaveLength(1);
+    expect(body[0].id).toBe('evt-future');
+  });
+});
+
+// ────────────────────────────────────────────────────────────
+// T-009: Tool descriptions ≤2 sentences (Bug #8)
+// ────────────────────────────────────────────────────────────
+
+describe('tool description length (Bug #8)', () => {
+  test('all tool descriptions are ≤ 2 sentences', () => {
+    for (const tool of toolDefinitions) {
+      const sentences = tool.description.split('. ').filter((s: string) => s.trim().length > 0);
+      expect(sentences.length).toBeLessThanOrEqual(2);
+    }
   });
 });

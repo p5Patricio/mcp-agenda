@@ -119,17 +119,64 @@ Get a formatted agenda for a date or date range.
 
 In `"text"` format, returns a human-readable agenda string. In `"json"` format, returns the raw event array.
 
+#### `get_upcoming_agenda`
+
+Returns upcoming events for an agent from today forward.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| agentId | string | no | Agent identity (default: `"default"`) |
+| limit | number | no | Max results (default: 10) |
+
+Returns array of events with date >= today, sorted by `date ASC, startTime ASC`. Delegates to `eventService.getUpcomingAgenda()`.
+
 **Modified tools:**
 
 | Tool | Change |
 |---|---|
-| `create_event` | `userId` → `agentId`. Same NLP dual-path (`text` or structured fields). |
+| `create_event` | `userId` → `agentId`. NLP dual-path. **ISO 8601 validation relaxed**: MUST accept `YYYY-MM-DDTHH:MM`, `YYYY-MM-DDTHH:MM:SS`, and `YYYY-MM-DDTHH:MM:SS.sssZ`. MUST reject formats without `T` separator or with non-numeric characters. |
 | `list_events` | `userId` → `agentId`. Supports `date` or `startDate`/`endDate`. |
 | `get_event` | No identity params (eventID only). Unchanged. |
 | `update_event` | No identity params. Unchanged. |
 | `delete_event` | No identity params. Unchanged. |
 | `get_daily_summary` | `userId` → `agentId`. |
-| `parse_event_text` | Renamed from `parse_event_text` → kept as auxiliary. No identity params. |
+| `parse_event_text` | Renamed from `parse_event_text` → kept as auxiliary. No identity params. **MUST validate `referenceDate`**: if provided and not a valid ISO 8601 date or parseable Date, return an error response instead of producing `Invalid Date` results. |
+
+**Tool descriptions**: All tool description strings MUST be ≤2 sentences and optimized for LLM context windows. Remove redundant implementation details.
+
+(Previously: ISO regex rejected timestamps without seconds; `referenceDate` was not validated producing silent `Invalid Date`; `getUpcomingAgenda` was implemented in `eventService` but not exposed as an MCP tool; tool descriptions were verbose)
+
+#### Scenario: ISO regex accepts timestamp without seconds
+
+- GIVEN a `create_event` call with `startTime: "2026-07-10T09:00"`
+- WHEN the server validates the ISO format
+- THEN the timestamp is accepted without error
+
+#### Scenario: ISO regex accepts timestamp with milliseconds
+
+- GIVEN a `create_event` call with `startTime: "2026-07-10T09:00:00.000Z"`
+- WHEN the server validates the ISO format
+- THEN the timestamp is accepted without error
+
+#### Scenario: ISO regex rejects invalid format
+
+- GIVEN a `create_event` call with `startTime: "2026/07/10 09:00"`
+- WHEN the server validates the ISO format
+- THEN the server returns a validation error
+
+#### Scenario: parse_event_text rejects invalid referenceDate
+
+- GIVEN a `parse_event_text` call with `referenceDate: "not-a-date"`
+- WHEN the server processes the request
+- THEN the server returns an error response
+- AND no event is created
+
+#### Scenario: get_upcoming_agenda returns future events
+
+- GIVEN an agent with events on past dates and future dates
+- WHEN the agent calls `get_upcoming_agenda`
+- THEN only events with date >= today are returned
+- AND results are sorted by date ASC, startTime ASC
 
 ### FR-05: NLP-driven event creation via MCP
 
@@ -140,6 +187,13 @@ The existing `voiceParser` service (chrono-node for Spanish) MUST be preserved a
 - The `referenceDate` parameter is optional; defaults to `new Date()`.
 - The system MUST return the created event object including parsed `title`, `date`, `startTime`, `endTime`, and `confidence`.
 - The `parse_event_text` tool MUST remain available for dry-run parsing without persistence.
+- **"mañana" ambiguity**: When "mañana" appears in the pattern `weekday + "por la mañana"`, it MUST resolve as "morning" (time-of-day modifier). Standalone "mañana" MUST continue to resolve as "tomorrow".
+- **Date expressions**: MUST support "la próxima semana" (→ next week's Monday), "dentro de N días" (→ today + N days), "en una semana" (→ today + 7 days).
+- **Time range minutes**: `extractEndHour` MUST capture both start and end minutes in time ranges. "de 3:30 a 4:45 de la tarde" MUST produce startTime 15:30, endTime 16:45.
+- **Title cleanup**: `extractTitle` MUST strip resolved date/time phrases from the extracted title (e.g., "el martes por la mañana", "la próxima semana", "dentro de 3 días").
+- **Confidence feedback**: All NLP tool responses (`create_event`, `parse_event_text`) MUST include a `confidence` field (0.0–1.0). When confidence < 0.5, the response MUST include a `warning` field: `"Low NLP confidence — review parsed fields before confirming"`.
+
+(Previously: "mañana" always resolved to "tomorrow" even in weekday morning contexts; no confidence warnings for low-quality parses; "la próxima semana" and relative-day expressions unsupported; `extractEndHour` lost start minutes producing wrong end times; `extractTitle` left date phrase artifacts in titles; confidence was computed but not surfaced to callers)
 
 #### Scenario: Create event via NLP
 
@@ -148,6 +202,59 @@ The existing `voiceParser` service (chrono-node for Spanish) MUST be preserved a
 - THEN it runs `parseVoiceInput` to extract title "Dentista", date (tomorrow), startTime (15:00), endTime (16:00)
 - AND an event is created and persisted with `createdVia: "voice"` and `rawTranscription` containing the original text
 - AND the created event object is returned in the response
+
+#### Scenario: "mañana" with weekday resolves to morning
+
+- GIVEN `parseVoiceInput("cita el martes por la mañana", refDate=Wednesday 2026-07-15)`
+- WHEN the NLP parser processes the input
+- THEN date resolves to Tuesday 2026-07-14
+- AND title is "Cita"
+
+#### Scenario: Standalone "mañana" still means tomorrow
+
+- GIVEN `parseVoiceInput("mañana tengo dentista", refDate=Wednesday 2026-07-15)`
+- WHEN the NLP parser processes the input
+- THEN date resolves to Thursday 2026-07-16
+
+#### Scenario: "la próxima semana" resolves to next Monday
+
+- GIVEN `parseVoiceInput("reunión la próxima semana", refDate=Wednesday 2026-07-15)`
+- WHEN the NLP parser processes the input
+- THEN date resolves to Monday 2026-07-20
+
+#### Scenario: "dentro de N días" resolves correctly
+
+- GIVEN `parseVoiceInput("cita dentro de 3 días", refDate=2026-07-15)`
+- WHEN the NLP parser processes the input
+- THEN date resolves to 2026-07-18
+
+#### Scenario: Time range preserves both start and end minutes
+
+- GIVEN `parseVoiceInput("cita de 3:30 a 4:45 de la tarde")`
+- WHEN the NLP parser extracts the time range
+- THEN startTime is 15:30
+- AND endTime is 16:45
+
+#### Scenario: Title is clean of date artifacts
+
+- GIVEN `parseVoiceInput("reunión de equipo el martes por la mañana")`
+- WHEN the NLP parser extracts the title
+- THEN title is "Reunión de equipo"
+- AND does NOT contain "el martes por la mañana"
+
+#### Scenario: Low confidence triggers warning
+
+- GIVEN an NLP input producing confidence 0.3
+- WHEN `create_event` or `parse_event_text` processes it
+- THEN response includes `confidence: 0.3`
+- AND response includes `warning: "Low NLP confidence — review parsed fields before confirming"`
+
+#### Scenario: High confidence produces no warning
+
+- GIVEN an NLP input producing confidence 0.8
+- WHEN `create_event` processes it
+- THEN response includes `confidence: 0.8`
+- AND no `warning` field is present
 
 ### FR-06: Event search
 
@@ -292,6 +399,29 @@ Migration steps:
 - Every MCP tool description MUST document its input schema and a usage example.
 - The CLI MUST print valid `--help` output.
 
+### NFR-06: Regression test coverage for stability fixes
+
+All 9 stability fixes MUST have dedicated regression tests in the Jest suite. Tests MUST be runnable via `cd backend && npm test`. After implementation, the full suite MUST pass and `cd backend && npx tsc --noEmit` MUST exit clean with zero errors.
+
+| Bug | Test file | Minimum assertions |
+|-----|-----------|--------------------|
+| ISO regex | `tools.test.ts` | 3 valid formats accepted, 2 invalid rejected |
+| mañana ambiguity | `voiceParser.test.ts` | weekday+morning → Tuesday; standalone → tomorrow |
+| Confidence | `tools.test.ts` | low → warning; high → no warning |
+| Date expressions | `voiceParser.test.ts` | "próxima semana", "dentro de N días", "en una semana" |
+| End-hour minutes | `voiceParser.test.ts` | "de 3:30 a 4:45" → 15:30/16:45 |
+| get_upcoming_agenda | `tools.test.ts` | tool callable, returns future events only |
+| referenceDate | `tools.test.ts` | invalid date → error response |
+| Descriptions | `tools.test.ts` | all descriptions ≤ 2 sentences |
+| Title cleanup | `voiceParser.test.ts` | date phrases stripped from title |
+
+#### Scenario: Full regression suite passes
+
+- GIVEN all 9 fixes are implemented
+- WHEN `cd backend && npm test` is executed
+- THEN all tests pass including ≥9 new regression tests
+- AND `cd backend && npx tsc --noEmit` exits with code 0
+
 ## Data Model Changes
 
 ### Modified: events table
@@ -330,8 +460,9 @@ Entirely removed. No daily summary settings, timezone preferences, or push token
 | `find_free_slots` | **New** | Yes | Find available time slots |
 | `check_conflicts` | **New** | Yes | Detect scheduling conflicts |
 | `get_agenda` | **New** | Yes | Get formatted agenda for date/range |
+| `get_upcoming_agenda` | **New** | Yes | Get upcoming events from today forward |
 
-Total: 11 tools.
+Total: 12 tools.
 
 ## MCP Resources Specification
 

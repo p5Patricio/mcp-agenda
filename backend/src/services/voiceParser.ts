@@ -13,6 +13,28 @@ import { ParsedVoiceEvent } from '../types';
  * Retorna la fecha correcta o null si no aplica.
  */
 function getDateOverride(text: string, referenceDate: Date): Date | null {
+  // "mañana" in weekday + "por la mañana" context → resolve weekday, NOT tomorrow
+  const mananaMorning = text.match(
+    /\b(lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)\b.*\bpor\s+la\s+ma[ñn]ana\b/i
+  );
+  if (mananaMorning) {
+    const weekdays: Record<string, number> = {
+      domingo: 0, lunes: 1, martes: 2, miercoles: 3, jueves: 4,
+      viernes: 5, sabado: 6,
+    };
+    const dayName = mananaMorning[1].toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const targetDay = weekdays[dayName];
+    if (targetDay !== undefined) {
+      const d = new Date(referenceDate);
+      const currentDay = d.getDay();
+      let diff = targetDay - currentDay;
+      if (diff >= 0) diff -= 7; // always past weekday
+      d.setDate(d.getDate() + diff);
+      d.setHours(0, 0, 0, 0);
+      return d;
+    }
+  }
+
   // "pasado mañana" = day after tomorrow
   if (/\bpasado\s+ma[ñn]ana\b/i.test(text)) {
     const d = new Date(referenceDate);
@@ -26,6 +48,33 @@ function getDateOverride(text: string, referenceDate: Date): Date | null {
   if (thisMonthMatch) {
     const d = new Date(referenceDate);
     d.setDate(parseInt(thisMonthMatch[1], 10));
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  // "la próxima semana" → next Monday
+  if (/\bla\s+pr[oó]xima\s+semana\b/i.test(text)) {
+    const d = new Date(referenceDate);
+    const dayOfWeek = d.getDay();
+    const daysUntilMonday = dayOfWeek === 0 ? 1 : 8 - dayOfWeek;
+    d.setDate(d.getDate() + daysUntilMonday);
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  // "dentro de N días" → refDate + N days
+  const dentroMatch = text.match(/\bdentro\s+de\s+(\d+)\s+d[ií]as\b/i);
+  if (dentroMatch) {
+    const d = new Date(referenceDate);
+    d.setDate(d.getDate() + parseInt(dentroMatch[1], 10));
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  // "en una semana" → refDate + 7 days
+  if (/\ben\s+una\s+semana\b/i.test(text)) {
+    const d = new Date(referenceDate);
+    d.setDate(d.getDate() + 7);
     d.setHours(0, 0, 0, 0);
     return d;
   }
@@ -79,12 +128,16 @@ function resolveHour(hour: number | null | undefined, timeWindow: string): numbe
  *
  * Retorna el número crudo (ej: 4, 12, 11) o null si no hay patrón "de X a Y".
  */
-function extractEndHour(timeWindow: string): { hour: number; minute: number } | null {
+function extractEndHour(timeWindow: string): { startMinute: number; hour: number; minute: number } | null {
   const m = timeWindow.match(
-    /de\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+a\s+(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)?/i,
+    /de\s+\d{1,2}(?::(\d{2}))?\s*(?:am|pm)?\s+a\s+(\d{1,2})(?::(\d{2}))?\s*(?:am|pm)?/i,
   );
   if (!m) return null;
-  return { hour: parseInt(m[1], 10), minute: m[2] ? parseInt(m[2], 10) : 0 };
+  return {
+    startMinute: m[1] ? parseInt(m[1], 10) : 0,
+    hour: parseInt(m[2], 10),
+    minute: m[3] ? parseInt(m[3], 10) : 0,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -117,6 +170,14 @@ const DATE_PREFIX_PATTERNS: RegExp[] = [
   /\bel\s+(?:pr[oó]ximo\s+)?(?:lunes|martes|mi[eé]rcoles|jueves|viernes|s[aá]bado|domingo)(?:\s+\d{1,2}(?:\s+de\s+\w+)?)?\b/gi,
   // "el day de [este mes | month]"
   /\bel\s+\d{1,2}\s+de\s+(?:este\s+mes|\w+)\b/gi,
+  // "por la mañana" (time-of-day modifier)
+  /\bpor\s+la\s+ma[ñn]ana\b/gi,
+  // "la próxima semana"
+  /\bla\s+pr[oó]xima\s+semana\b/gi,
+  // "dentro de N días"
+  /\bdentro\s+de\s+\d+\s+d[ií]as\b/gi,
+  // "en una semana"
+  /\ben\s+una\s+semana\b/gi,
 ];
 
 const CONNECTOR_PATTERNS: RegExp[] = [
@@ -200,19 +261,22 @@ export function parseVoiceInput(
 ): ParsedVoiceEvent {
   const results = chrono.es.parse(text, referenceDate, { forwardDate: true });
 
+  // Check date override BEFORE empty-results early return
+  const dateOverride = getDateOverride(text, referenceDate);
+
   if (results.length === 0) {
+    const baseDate = dateOverride ?? referenceDate;
     return {
       title: extractTitle(text, []),
-      date: formatDate(referenceDate),
-      startTime: toLocalISO(referenceDate, referenceDate.getHours(), referenceDate.getMinutes()),
-      endTime: toLocalISO(referenceDate, referenceDate.getHours() + 1, referenceDate.getMinutes()),
+      date: formatDate(baseDate),
+      startTime: toLocalISO(baseDate, baseDate.getHours(), baseDate.getMinutes()),
+      endTime: toLocalISO(baseDate, baseDate.getHours() + 1, baseDate.getMinutes()),
       confidence: 0.10,
       rawText: text,
     };
   }
 
   // Fecha: override si chrono no la parseó bien, o la del primer resultado
-  const dateOverride = getDateOverride(text, referenceDate);
   const baseDate: Date = (() => {
     if (dateOverride) return dateOverride;
     const d = new Date(results[0].start.date());
@@ -252,6 +316,10 @@ export function parseVoiceInput(
         endHour = resolved;
         endMinute = rawEndFromText.minute;
         hasEndTime = true;
+      }
+      // Override start minute from regex when chrono didn't capture it
+      if (rawEndFromText.startMinute > 0) {
+        startMinute = rawEndFromText.startMinute;
       }
     } else if (timeResult.end != null && timeResult.end.get('hour') != null) {
       const rawEnd = resolveHour(timeResult.end.get('hour'), timeWindow);

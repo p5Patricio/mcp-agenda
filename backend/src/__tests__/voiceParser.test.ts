@@ -146,3 +146,73 @@ describe('parseVoiceInput — casos edge', () => {
     expect(hour(r.endTime)).toBe(15);
   });
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-003: "mañana" disambiguation (Bug #2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseVoiceInput — mañana disambiguation (Bug #2)', () => {
+  // refDate = Wednesday 2026-07-15
+  const REF_WED = new Date(2026, 6, 15, 12, 0, 0);
+
+  test('"cita el martes por la mañana" → date = Tuesday 2026-07-14 (weekday, NOT tomorrow)', () => {
+    const r = parseVoiceInput('cita el martes por la mañana', REF_WED);
+    expect(r.date).toBe('2026-07-14');
+    expect(r.title).toBe('Cita');
+  });
+
+  test('standalone "mañana tengo dentista" → date = 2026-07-16 (tomorrow)', () => {
+    const r = parseVoiceInput('mañana tengo dentista', REF_WED);
+    expect(r.date).toBe('2026-07-16');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-004: Date expressions (Bug #4)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseVoiceInput — date expressions (Bug #4)', () => {
+  // refDate = Wednesday 2026-07-15
+  const REF_WED = new Date(2026, 6, 15, 12, 0, 0);
+
+  test('"reunión la próxima semana" → next Monday 2026-07-20', () => {
+    const r = parseVoiceInput('reunión la próxima semana', REF_WED);
+    expect(r.date).toBe('2026-07-20');
+  });
+
+  test('"cita dentro de 3 días" → 2026-07-18', () => {
+    const r = parseVoiceInput('cita dentro de 3 días', REF_WED);
+    expect(r.date).toBe('2026-07-18');
+  });
+
+  test('"cita en una semana" → 2026-07-22', () => {
+    const r = parseVoiceInput('cita en una semana', REF_WED);
+    expect(r.date).toBe('2026-07-22');
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-005: Time range preserves both start and end minutes (Bug #5)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseVoiceInput — time range minutes (Bug #5)', () => {
+  test('"de 3:30 a 4:45 de la tarde" → startTime=15:30, endTime=16:45', () => {
+    const r = parseVoiceInput('cita de 3:30 a 4:45 de la tarde', REF);
+    expect(hour(r.startTime)).toBe(15);
+    expect(minute(r.startTime)).toBe(30);
+    expect(hour(r.endTime)).toBe(16);
+    expect(minute(r.endTime)).toBe(45);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// T-006: Title cleanup — date phrases stripped (Bug #9)
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('parseVoiceInput — title cleanup (Bug #9)', () => {
+  test('"reunión de equipo el martes por la mañana" → title = "Reunión de equipo"', () => {
+    const REF_WED = new Date(2026, 6, 15, 12, 0, 0);
+    const r = parseVoiceInput('reunión de equipo el martes por la mañana', REF_WED);
+    expect(r.title).toBe('Reunión de equipo');
+  });
+});

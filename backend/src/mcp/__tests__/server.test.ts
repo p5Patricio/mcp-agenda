@@ -43,9 +43,9 @@ import { resourceTemplates } from '../resources';
 import { runServer } from '../server';
 
 describe('MCP Server Integration', () => {
-  test('all 11 tool handlers are registered', () => {
+  test('all 12 tool handlers are registered', () => {
     const names = Object.keys(toolHandlers);
-    expect(names).toHaveLength(11);
+    expect(names).toHaveLength(12);
     expect(names).toEqual([
       'create_event',
       'list_events',
@@ -58,6 +58,7 @@ describe('MCP Server Integration', () => {
       'find_free_slots',
       'check_conflicts',
       'get_agenda',
+      'get_upcoming_agenda',
     ]);
   });
 

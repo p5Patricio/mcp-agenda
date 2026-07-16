@@ -18,7 +18,7 @@ export type ToolHandler = (args: Record<string, unknown>) => Promise<CallToolRes
 // ────────────────────────────────────────────────────────────
 
 const isoDateRegex = /^\d{4}-\d{2}-\d{2}$/;
-const isoDateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+const isoDateTimeRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{3})?Z?)?$/;
 
 const CreateEventArgsSchema = z.object({
   agentId: z.string().default('default'),
@@ -95,6 +95,11 @@ const GetAgendaArgsSchema = z.object({
   format: z.enum(['text', 'json']).optional().default('text'),
 });
 
+const GetUpcomingAgendaArgsSchema = z.object({
+  agentId: z.string().default('default'),
+  limit: z.number().optional().default(10),
+});
+
 // ────────────────────────────────────────────────────────────
 // Handlers
 // ────────────────────────────────────────────────────────────
@@ -118,7 +123,11 @@ async function handleCreateEvent(args: Record<string, unknown>): Promise<CallToo
         rawTranscription: parsed.text,
       });
 
-      return { content: [{ type: 'text', text: JSON.stringify(event) }] };
+      const responseObj: Record<string, unknown> = { ...event, confidence: parsedVoice.confidence };
+      if (parsedVoice.confidence < 0.5) {
+        responseObj.warning = 'Low NLP confidence — review parsed fields before confirming';
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(responseObj) }] };
     }
 
     if (parsed.title && parsed.date && parsed.startTime && parsed.endTime) {
@@ -223,7 +232,16 @@ async function handleGetDailySummary(args: Record<string, unknown>): Promise<Cal
 async function handleParseEventText(args: Record<string, unknown>): Promise<CallToolResult> {
   try {
     const parsed = ParseEventTextArgsSchema.parse(args);
-    const referenceDate = parsed.referenceDate ? new Date(parsed.referenceDate) : undefined;
+    let referenceDate: Date | undefined;
+    if (parsed.referenceDate) {
+      referenceDate = new Date(parsed.referenceDate);
+      if (isNaN(referenceDate.getTime())) {
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ error: 'Invalid referenceDate format' }) }],
+          isError: true,
+        };
+      }
+    }
     const result = parseVoiceInput(parsed.text, referenceDate);
 
     return {
@@ -236,6 +254,7 @@ async function handleParseEventText(args: Record<string, unknown>): Promise<Call
             startTime: result.startTime,
             endTime: result.endTime,
             confidence: result.confidence,
+            ...(result.confidence < 0.5 && { warning: 'Low NLP confidence — review parsed fields before confirming' }),
           }),
         },
       ],
@@ -324,6 +343,16 @@ async function handleGetAgenda(args: Record<string, unknown>): Promise<CallToolR
   }
 }
 
+async function handleGetUpcomingAgenda(args: Record<string, unknown>): Promise<CallToolResult> {
+  try {
+    const parsed = GetUpcomingAgendaArgsSchema.parse(args);
+    const events = await eventService.getUpcomingAgenda(parsed.agentId, parsed.limit);
+    return { content: [{ type: 'text', text: JSON.stringify(events) }] };
+  } catch (err) {
+    throw toMcpError(err);
+  }
+}
+
 // ────────────────────────────────────────────────────────────
 // Exports
 // ────────────────────────────────────────────────────────────
@@ -340,6 +369,7 @@ export const toolHandlers: Record<string, ToolHandler> = {
   find_free_slots: handleFindFreeSlots,
   check_conflicts: handleCheckConflicts,
   get_agenda: handleGetAgenda,
+  get_upcoming_agenda: handleGetUpcomingAgenda,
 };
 
 export const toolDefinitions = [
@@ -490,6 +520,17 @@ export const toolDefinitions = [
         startDate: { type: 'string', description: 'Range start (YYYY-MM-DD)' },
         endDate: { type: 'string', description: 'Range end (YYYY-MM-DD)' },
         format: { type: 'string', description: 'Output format: "text" or "json" (default: "text")' },
+      },
+    },
+  },
+  {
+    name: 'get_upcoming_agenda',
+    description: 'Get upcoming events from today forward.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        agentId: { type: 'string', description: 'Agent identity (default: "default")' },
+        limit: { type: 'number', description: 'Max results (default: 10)' },
       },
     },
   },
